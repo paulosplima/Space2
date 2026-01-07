@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import GameEngine from './components/GameEngine';
 import TouchControls from './components/TouchControls';
 import { GameStatus, GameState } from './types';
@@ -37,23 +37,51 @@ const App: React.FC = () => {
     }
   }, [gameState.status, gameState.score, gameState.level, updateTactical]);
 
+  // Memoize callbacks to prevent GameEngine from re-mounting or re-starting loop unnecessarily
+  const handleGameOver = useCallback((score: number) => {
+    setGameState(prev => ({ ...prev, status: 'GAMEOVER', score }));
+  }, []);
+
+  const handleWin = useCallback((score: number) => {
+    setGameState(prev => ({ ...prev, status: 'WON', score }));
+  }, []);
+
+  const handleScoreUpdate = useCallback((score: number) => {
+    setGameState(prev => ({ ...prev, score }));
+  }, []);
+
+  const handleLivesUpdate = useCallback((lives: number) => {
+    setGameState(prev => ({ ...prev, lives }));
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.repeat) return;
       const key = e.key.toLowerCase();
-      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: true }));
-      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: true }));
-      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: true }));
-      if (e.shiftKey) setInput(prev => ({ ...prev, dash: true }));
-      if (key === 'c') setInput(prev => ({ ...prev, overdrive: true }));
+      
+      setInput(prev => {
+        const next = { ...prev };
+        if (key === 'arrowleft' || key === 'a') next.left = true;
+        if (key === 'arrowright' || key === 'd') next.right = true;
+        if (key === ' ' || key === 'enter') next.fire = true;
+        if (key === 'shift') next.dash = true;
+        if (key === 'c') next.overdrive = true;
+        return next;
+      });
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: false }));
-      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: false }));
-      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: false }));
-      if (!e.shiftKey) setInput(prev => ({ ...prev, dash: false }));
-      if (key === 'c') setInput(prev => ({ ...prev, overdrive: false }));
+      
+      setInput(prev => {
+        const next = { ...prev };
+        if (key === 'arrowleft' || key === 'a') next.left = false;
+        if (key === 'arrowright' || key === 'd') next.right = false;
+        if (key === ' ' || key === 'enter') next.fire = false;
+        if (key === 'shift') next.dash = false;
+        if (key === 'c') next.overdrive = false;
+        return next;
+      });
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -65,7 +93,7 @@ const App: React.FC = () => {
   }, []);
 
   const startGame = () => {
-    setGameState(prev => ({ ...prev, status: 'PLAYING', score: 0, level: 1, lives: 3 }));
+    setGameState({ status: 'PLAYING', score: 0, level: 1, lives: 3 });
   };
 
   return (
@@ -75,7 +103,7 @@ const App: React.FC = () => {
           <h1 className="text-2xl md:text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
             NEON STRIKE
           </h1>
-          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.1</span>
+          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.2</span>
         </div>
         
         <div className="flex items-center gap-6">
@@ -94,10 +122,10 @@ const App: React.FC = () => {
       <main className="flex-1 relative flex items-center justify-center max-w-4xl mx-auto w-full">
         <GameEngine 
           status={gameState.status}
-          onGameOver={(score) => setGameState(prev => ({ ...prev, status: 'GAMEOVER', score }))}
-          onWin={(score) => setGameState(prev => ({ ...prev, status: 'WON', score }))}
-          onScoreUpdate={(score) => setGameState(prev => ({ ...prev, score }))}
-          onLivesUpdate={(lives) => setGameState(prev => ({ ...prev, lives }))}
+          onGameOver={handleGameOver}
+          onWin={handleWin}
+          onScoreUpdate={handleScoreUpdate}
+          onLivesUpdate={handleLivesUpdate}
           input={input}
         />
 
@@ -115,7 +143,7 @@ const App: React.FC = () => {
 
         {gameState.status === 'START' && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm rounded-lg p-6 text-center">
-            <div className="max-w-md">
+            <div className="max-w-md animate-in fade-in zoom-in duration-300">
               <h2 className="text-5xl font-black mb-2 italic">NEON STRIKE</h2>
               <p className="text-cyan-400 mb-8 uppercase tracking-[0.3em] font-bold text-xs">Protocolo Matchin Ativado</p>
               <div className="space-y-4">

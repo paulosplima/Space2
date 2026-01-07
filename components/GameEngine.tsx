@@ -38,11 +38,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | undefined>(undefined);
   
-  // Ref para sincronizar o input sem reiniciar o loop de animação
+  // Use refs for inputs and callbacks to keep the animate loop stable
   const inputRef = useRef(input);
   useEffect(() => {
     inputRef.current = input;
   }, [input]);
+
+  const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
+  useEffect(() => {
+    callbacksRef.current = { onGameOver, onWin, onScoreUpdate, onLivesUpdate };
+  }, [onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
 
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
@@ -97,9 +102,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
     invaderSpeed.current = 1;
     bulletsRef.current = [];
     scoreRef.current = 0;
-    onScoreUpdate(0);
-    onLivesUpdate(3);
-  }, [onScoreUpdate, onLivesUpdate]);
+    callbacksRef.current.onScoreUpdate(0);
+    callbacksRef.current.onLivesUpdate(3);
+  }, []);
 
   useEffect(() => {
     if (status === 'PLAYING') {
@@ -120,7 +125,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   const fireBullet = (x: number, y: number, isMega = false, angle = 0) => {
     const vy = -BULLET_SPEED;
-    const vx = angle * BULLET_SPEED;
     
     bulletsRef.current.push({
       x: x - (isMega ? 6 : 2),
@@ -155,8 +159,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
     // Dash Logic
     if (currentInput.dash && Date.now() - lastDashTime.current > 800) {
-      if (currentInput.left) p.x -= 100;
-      if (currentInput.right) p.x += 100;
+      if (currentInput.left) p.x -= 120;
+      if (currentInput.right) p.x += 120;
       lastDashTime.current = Date.now();
       spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 10);
     }
@@ -177,14 +181,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
           lastFireTime.current = now;
         }
       } else {
+        // Fire one bullet immediately if we haven't fired in a while
+        if (p.charge === 0 && now - lastFireTime.current > 400) {
+            fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
+            lastFireTime.current = now;
+        }
         p.charge = Math.min(100, p.charge + 2);
       }
     } else {
       if (p.charge >= 100) {
         fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
-        lastFireTime.current = now;
-      } else if (p.charge > 5 && now - lastFireTime.current > 250) {
-        fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
         lastFireTime.current = now;
       }
       p.charge = 0;
@@ -196,7 +202,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       if (!invader.alive) return;
       invader.x += invaderDirection.current * invaderSpeed.current;
       if (invader.x + invader.width > CANVAS_WIDTH - 10 || invader.x < 10) edgeReached = true;
-      if (invader.y + invader.height > p.y) onGameOver(scoreRef.current);
+      if (invader.y + invader.height > p.y) callbacksRef.current.onGameOver(scoreRef.current);
     });
 
     if (edgeReached) {
@@ -230,7 +236,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
               bullet.y + bullet.height > invader.y) {
             invader.alive = false;
             scoreRef.current += invader.points;
-            onScoreUpdate(scoreRef.current);
+            callbacksRef.current.onScoreUpdate(scoreRef.current);
             spawnExplosion(invader.x + invader.width/2, invader.y + invader.height/2, bullet.isMega ? COLORS.PINK : COLORS.CYAN);
             if (!bullet.isMega) return false;
           }
@@ -239,9 +245,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
         if (bullet.x < p.x + PLAYER_WIDTH && bullet.x + bullet.width > p.x &&
             bullet.y < p.y + PLAYER_HEIGHT && bullet.y + bullet.height > p.y) {
           p.lives--;
-          onLivesUpdate(p.lives);
+          callbacksRef.current.onLivesUpdate(p.lives);
           spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 15);
-          if (p.lives <= 0) onGameOver(scoreRef.current);
+          if (p.lives <= 0) callbacksRef.current.onGameOver(scoreRef.current);
           return false;
         }
       }
@@ -251,7 +257,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     particlesRef.current.forEach(part => { part.x += part.vx; part.y += part.vy; part.life -= 0.025; });
     particlesRef.current = particlesRef.current.filter(part => part.life > 0);
 
-    if (invadersRef.current.length > 0 && invadersRef.current.every(i => !i.alive)) onWin(scoreRef.current);
+    if (invadersRef.current.length > 0 && invadersRef.current.every(i => !i.alive)) callbacksRef.current.onWin(scoreRef.current);
   };
 
   const draw = () => {
@@ -326,7 +332,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     update();
     draw();
     requestRef.current = requestAnimationFrame(animate);
-  }, [status, onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
+  }, [status]); // Only restart loop if game status changes (Start/Over)
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
