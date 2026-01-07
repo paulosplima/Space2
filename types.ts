@@ -13,6 +13,7 @@ export interface Player extends Entity {
   isOverdrive: boolean;
   overdriveTime: number;
   charge: number;
+  hitFlashTime: number; // Added for visual feedback
 }
 
 export interface Invader extends Entity {

@@ -42,6 +42,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const inputRef = useRef(input);
   const statusRef = useRef(status);
   const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
+  const shakeRef = useRef(0);
 
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
@@ -53,7 +54,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
     energy: 100,
     isOverdrive: false,
     overdriveTime: 0,
-    charge: 0
+    charge: 0,
+    hitFlashTime: 0
   });
 
   const invadersRef = useRef<Invader[]>([]);
@@ -97,7 +99,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
       lives: 3,
       energy: 100,
       charge: 0,
-      isOverdrive: false
+      isOverdrive: false,
+      hitFlashTime: 0
     };
 
     invadersRef.current = invaders;
@@ -107,9 +110,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
     scoreRef.current = 0;
     callbacksRef.current.onScoreUpdate(0);
     callbacksRef.current.onLivesUpdate(3);
+    shakeRef.current = 0;
   }, []);
 
-  const spawnExplosion = (x: number, y: number, color: string, count = 8) => {
+  const spawnExplosion = (x: number, y: number, color: string, count = 8, intensity = 0) => {
     for (let i = 0; i < count; i++) {
       particlesRef.current.push({
         x, y,
@@ -117,6 +121,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
         vy: (Math.random() - 0.5) * 12,
         life: 1, color
       });
+    }
+    if (intensity > 0) {
+      shakeRef.current = Math.max(shakeRef.current, intensity);
     }
   };
 
@@ -130,7 +137,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
       fromPlayer: true,
       isMega
     });
-    if (isMega) audio.playMegaShoot(); else audio.playShoot();
+    if (isMega) {
+      audio.playMegaShoot();
+      shakeRef.current = Math.max(shakeRef.current, 5);
+    } else {
+      audio.playShoot();
+    }
   };
 
   const update = () => {
@@ -140,6 +152,13 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const p = playerRef.current;
     const now = Date.now();
     let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.8 : PLAYER_SPEED;
+
+    // Shake Decay
+    if (shakeRef.current > 0) shakeRef.current *= 0.9;
+    if (shakeRef.current < 0.1) shakeRef.current = 0;
+
+    // Flash Decay
+    if (p.hitFlashTime > 0) p.hitFlashTime--;
 
     // Movement
     if (inp.left) p.x -= currentSpeed;
@@ -153,7 +172,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
       lastDashTime.current = now;
       audio.playDash();
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 15);
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 15, 3);
     }
 
     // Overdrive (C)
@@ -165,18 +184,17 @@ const GameEngine: React.FC<GameEngineProps> = ({
       p.overdriveTime = 400;
       p.energy = 0;
       audio.playOverdrive();
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 30);
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 30, 15);
     }
     if (!p.isOverdrive && p.energy < 100) p.energy += 0.5;
 
-    // REFACTORED: Firing Logic
-    const COOLDOWN_STANDARD = 250; // ms
-    const COOLDOWN_OVERDRIVE = 90; // ms
+    // Firing Logic
+    const COOLDOWN_STANDARD = 250;
+    const COOLDOWN_OVERDRIVE = 90;
     const CHARGE_RATE = 2.5;
 
     if (inp.fire) {
       if (p.isOverdrive) {
-        // Overdrive Rapid Fire
         if (now - lastFireTime.current > COOLDOWN_OVERDRIVE) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           fireBullet(p.x + PLAYER_WIDTH / 2 - 25, p.y + 10);
@@ -184,20 +202,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
           lastFireTime.current = now;
         }
       } else {
-        // Standard Semi-Auto Firing
-        // Fire once immediately on trigger pull if off cooldown
         if (!wasFiringRef.current && now - lastFireTime.current > COOLDOWN_STANDARD) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           lastFireTime.current = now;
         }
-        // Accumulate charge while trigger is held
         p.charge = Math.min(100, p.charge + CHARGE_RATE);
       }
       wasFiringRef.current = true;
     } else {
-      // Trigger Released
       if (wasFiringRef.current) {
-        // Fire charged shot if criteria met
         if (!p.isOverdrive && p.charge >= 100) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
           lastFireTime.current = now;
@@ -244,7 +257,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
             inv.alive = false;
             scoreRef.current += inv.points;
             callbacksRef.current.onScoreUpdate(scoreRef.current);
-            spawnExplosion(inv.x + inv.width/2, inv.y + inv.height/2, b.isMega ? COLORS.PINK : COLORS.CYAN);
+            spawnExplosion(inv.x + inv.width/2, inv.y + inv.height/2, b.isMega ? COLORS.PINK : COLORS.CYAN, 8, b.isMega ? 10 : 2);
             audio.playExplosion();
             if (!b.isMega) return false;
           }
@@ -252,8 +265,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
       } else {
         if (b.x < p.x + PLAYER_WIDTH && b.x + b.width > p.x && b.y < p.y + PLAYER_HEIGHT && b.y + b.height > p.y) {
           p.lives--;
+          p.hitFlashTime = 15; // Set flash duration
           callbacksRef.current.onLivesUpdate(p.lives);
-          spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 20);
+          spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 20, 20);
           audio.playPlayerHit();
           if (p.lives <= 0) callbacksRef.current.onGameOver(scoreRef.current);
           return false;
@@ -274,6 +288,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.save();
+    
+    // Screen Shake
+    if (shakeRef.current > 0) {
+      const sx = (Math.random() - 0.5) * shakeRef.current;
+      const sy = (Math.random() - 0.5) * shakeRef.current;
+      ctx.translate(sx, sy);
+    }
+
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
@@ -291,9 +314,14 @@ const GameEngine: React.FC<GameEngineProps> = ({
     });
     ctx.globalAlpha = 1;
 
+    // Player Ship with Hit Flash
+    const shipColor = p.hitFlashTime > 0 
+      ? (p.hitFlashTime % 2 === 0 ? '#fff' : COLORS.RED) 
+      : (p.isOverdrive ? COLORS.PINK : COLORS.GREEN);
+    
     ctx.shadowBlur = p.isOverdrive ? 30 : 15;
-    ctx.shadowColor = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
-    ctx.fillStyle = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
+    ctx.shadowColor = p.hitFlashTime > 0 ? COLORS.RED : (p.isOverdrive ? COLORS.PINK : COLORS.GREEN);
+    ctx.fillStyle = shipColor;
     ctx.beginPath();
     ctx.moveTo(p.x + PLAYER_WIDTH/2, p.y);
     ctx.lineTo(p.x, p.y + PLAYER_HEIGHT);
@@ -327,7 +355,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
       ctx.fillStyle = ctx.shadowColor;
       ctx.fillRect(b.x, b.y, b.width, b.height);
     });
-    ctx.shadowBlur = 0;
+    
+    ctx.restore();
   };
 
   useEffect(() => {
