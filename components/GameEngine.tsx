@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 import { 
   CANVAS_WIDTH, 
   CANVAS_HEIGHT, 
@@ -24,7 +24,7 @@ interface GameEngineProps {
   onWin: (score: number) => void;
   onScoreUpdate: (score: number) => void;
   onLivesUpdate: (lives: number) => void;
-  input: { left: boolean; right: boolean; fire: boolean };
+  input: { left: boolean; right: boolean; fire: boolean; dash: boolean; overdrive: boolean };
 }
 
 const GameEngine: React.FC<GameEngineProps> = ({ 
@@ -36,26 +36,35 @@ const GameEngine: React.FC<GameEngineProps> = ({
   input 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Initializing with undefined to satisfy the expected 1 argument for useRef in some strict environments
   const requestRef = useRef<number | undefined>(undefined);
   
-  // Game State Refs (to avoid re-renders)
+  // Ref para sincronizar o input sem reiniciar o loop de animação
+  const inputRef = useRef(input);
+  useEffect(() => {
+    inputRef.current = input;
+  }, [input]);
+
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
     y: CANVAS_HEIGHT - 60,
     width: PLAYER_WIDTH,
     height: PLAYER_HEIGHT,
     speed: PLAYER_SPEED,
-    lives: 3
+    lives: 3,
+    energy: 100,
+    isOverdrive: false,
+    overdriveTime: 0,
+    charge: 0
   });
 
   const invadersRef = useRef<Invader[]>([]);
   const bulletsRef = useRef<Bullet[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const scoreRef = useRef(0);
-  const invaderDirection = useRef(1); // 1 for right, -1 for left
+  const invaderDirection = useRef(1);
   const invaderSpeed = useRef(1);
   const lastFireTime = useRef(0);
+  const lastDashTime = useRef(0);
 
   const initLevel = useCallback(() => {
     const invaders: Invader[] = [];
@@ -75,53 +84,110 @@ const GameEngine: React.FC<GameEngineProps> = ({
         });
       }
     }
+    
+    // Reset Player position and state
+    playerRef.current.x = CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2;
+    playerRef.current.y = CANVAS_HEIGHT - 60;
+    playerRef.current.lives = 3;
+    playerRef.current.energy = 100;
+    playerRef.current.charge = 0;
+    playerRef.current.isOverdrive = false;
+
     invadersRef.current = invaders;
     invaderSpeed.current = 1;
     bulletsRef.current = [];
-  }, []);
+    scoreRef.current = 0;
+    onScoreUpdate(0);
+    onLivesUpdate(3);
+  }, [onScoreUpdate, onLivesUpdate]);
 
   useEffect(() => {
     if (status === 'PLAYING') {
       initLevel();
-      onLivesUpdate(3);
-      onScoreUpdate(0);
-      playerRef.current.lives = 3;
-      scoreRef.current = 0;
     }
-  }, [status, initLevel, onLivesUpdate, onScoreUpdate]);
+  }, [status, initLevel]);
 
-  const spawnExplosion = (x: number, y: number, color: string) => {
-    for (let i = 0; i < 8; i++) {
+  const spawnExplosion = (x: number, y: number, color: string, count = 8) => {
+    for (let i = 0; i < count; i++) {
       particlesRef.current.push({
-        x,
-        y,
-        vx: (Math.random() - 0.5) * 6,
-        vy: (Math.random() - 0.5) * 6,
-        life: 1,
-        color
+        x, y,
+        vx: (Math.random() - 0.5) * 8,
+        vy: (Math.random() - 0.5) * 8,
+        life: 1, color
       });
     }
+  };
+
+  const fireBullet = (x: number, y: number, isMega = false, angle = 0) => {
+    const vy = -BULLET_SPEED;
+    const vx = angle * BULLET_SPEED;
+    
+    bulletsRef.current.push({
+      x: x - (isMega ? 6 : 2),
+      y: y,
+      width: isMega ? 12 : BULLET_WIDTH,
+      height: isMega ? 24 : BULLET_HEIGHT,
+      speed: vy,
+      fromPlayer: true,
+      isMega
+    });
   };
 
   const update = () => {
     if (status !== 'PLAYING') return;
 
-    // Move Player
-    if (input.left && playerRef.current.x > 0) playerRef.current.x -= PLAYER_SPEED;
-    if (input.right && playerRef.current.x < CANVAS_WIDTH - PLAYER_WIDTH) playerRef.current.x += PLAYER_SPEED;
+    const currentInput = inputRef.current;
+    const p = playerRef.current;
+    let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
 
-    // Player Shooting
+    // Overdrive Logic
+    if (p.isOverdrive) {
+      p.overdriveTime--;
+      if (p.overdriveTime <= 0) p.isOverdrive = false;
+    } else if (currentInput.overdrive && p.energy >= 100) {
+      p.isOverdrive = true;
+      p.overdriveTime = 300;
+      p.energy = 0;
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 20);
+    }
+    
+    if (!p.isOverdrive && p.energy < 100) p.energy += 0.3;
+
+    // Dash Logic
+    if (currentInput.dash && Date.now() - lastDashTime.current > 800) {
+      if (currentInput.left) p.x -= 100;
+      if (currentInput.right) p.x += 100;
+      lastDashTime.current = Date.now();
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 10);
+    }
+
+    // Move Player
+    if (currentInput.left) p.x -= currentSpeed;
+    if (currentInput.right) p.x += currentSpeed;
+    p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
+
+    // Shooting Logic
     const now = Date.now();
-    if (input.fire && now - lastFireTime.current > 400) {
-      bulletsRef.current.push({
-        x: playerRef.current.x + PLAYER_WIDTH / 2 - BULLET_WIDTH / 2,
-        y: playerRef.current.y - 10,
-        width: BULLET_WIDTH,
-        height: BULLET_HEIGHT,
-        speed: -BULLET_SPEED,
-        fromPlayer: true
-      });
-      lastFireTime.current = now;
+    if (currentInput.fire) {
+      if (p.isOverdrive) {
+        if (now - lastFireTime.current > 120) {
+          fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
+          fireBullet(p.x + PLAYER_WIDTH / 2 - 15, p.y, false, -0.15);
+          fireBullet(p.x + PLAYER_WIDTH / 2 + 15, p.y, false, 0.15);
+          lastFireTime.current = now;
+        }
+      } else {
+        p.charge = Math.min(100, p.charge + 2);
+      }
+    } else {
+      if (p.charge >= 100) {
+        fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
+        lastFireTime.current = now;
+      } else if (p.charge > 5 && now - lastFireTime.current > 250) {
+        fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
+        lastFireTime.current = now;
+      }
+      p.charge = 0;
     }
 
     // Move Invaders
@@ -130,42 +196,31 @@ const GameEngine: React.FC<GameEngineProps> = ({
       if (!invader.alive) return;
       invader.x += invaderDirection.current * invaderSpeed.current;
       if (invader.x + invader.width > CANVAS_WIDTH - 10 || invader.x < 10) edgeReached = true;
-      
-      // Check collision with player
-      if (invader.y + invader.height > playerRef.current.y) {
-        onGameOver(scoreRef.current);
-      }
+      if (invader.y + invader.height > p.y) onGameOver(scoreRef.current);
     });
 
     if (edgeReached) {
       invaderDirection.current *= -1;
-      invadersRef.current.forEach(invader => {
-        invader.y += 20;
-      });
-      invaderSpeed.current += 0.1;
+      invadersRef.current.forEach(invader => { invader.y += 20; });
+      invaderSpeed.current += 0.05;
     }
 
     // Invader Shooting
     if (Math.random() < 0.02) {
-      const activeInvaders = invadersRef.current.filter(i => i.alive);
-      if (activeInvaders.length > 0) {
-        const shooter = activeInvaders[Math.floor(Math.random() * activeInvaders.length)];
+      const active = invadersRef.current.filter(i => i.alive);
+      if (active.length > 0) {
+        const s = active[Math.floor(Math.random() * active.length)];
         bulletsRef.current.push({
-          x: shooter.x + shooter.width / 2,
-          y: shooter.y + shooter.height,
-          width: BULLET_WIDTH,
-          height: BULLET_HEIGHT,
-          speed: BULLET_SPEED - 2,
-          fromPlayer: false
+          x: s.x + s.width / 2, y: s.y + s.height,
+          width: BULLET_WIDTH, height: BULLET_HEIGHT,
+          speed: BULLET_SPEED - 2, fromPlayer: false
         });
       }
     }
 
-    // Update Bullets
+    // Bullets and Collisions
     bulletsRef.current = bulletsRef.current.filter(bullet => {
       bullet.y += bullet.speed;
-
-      // Player bullet hit invader
       if (bullet.fromPlayer) {
         for (const invader of invadersRef.current) {
           if (invader.alive &&
@@ -176,41 +231,27 @@ const GameEngine: React.FC<GameEngineProps> = ({
             invader.alive = false;
             scoreRef.current += invader.points;
             onScoreUpdate(scoreRef.current);
-            spawnExplosion(invader.x + invader.width / 2, invader.y + invader.height / 2, COLORS.CYAN);
-            return false;
+            spawnExplosion(invader.x + invader.width/2, invader.y + invader.height/2, bullet.isMega ? COLORS.PINK : COLORS.CYAN);
+            if (!bullet.isMega) return false;
           }
         }
       } else {
-        // Invader bullet hit player
-        if (bullet.x < playerRef.current.x + PLAYER_WIDTH &&
-            bullet.x + bullet.width > playerRef.current.x &&
-            bullet.y < playerRef.current.y + PLAYER_HEIGHT &&
-            bullet.y + bullet.height > playerRef.current.y) {
-          playerRef.current.lives--;
-          onLivesUpdate(playerRef.current.lives);
-          spawnExplosion(playerRef.current.x + PLAYER_WIDTH / 2, playerRef.current.y + PLAYER_HEIGHT / 2, COLORS.RED);
-          if (playerRef.current.lives <= 0) {
-            onGameOver(scoreRef.current);
-          }
+        if (bullet.x < p.x + PLAYER_WIDTH && bullet.x + bullet.width > p.x &&
+            bullet.y < p.y + PLAYER_HEIGHT && bullet.y + bullet.height > p.y) {
+          p.lives--;
+          onLivesUpdate(p.lives);
+          spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 15);
+          if (p.lives <= 0) onGameOver(scoreRef.current);
           return false;
         }
       }
-
       return bullet.y > 0 && bullet.y < CANVAS_HEIGHT;
     });
 
-    // Update Particles
-    particlesRef.current.forEach(p => {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.life -= 0.02;
-    });
-    particlesRef.current = particlesRef.current.filter(p => p.life > 0);
+    particlesRef.current.forEach(part => { part.x += part.vx; part.y += part.vy; part.life -= 0.025; });
+    particlesRef.current = particlesRef.current.filter(part => part.life > 0);
 
-    // Check Win
-    if (invadersRef.current.every(i => !i.alive)) {
-      onWin(scoreRef.current);
-    }
+    if (invadersRef.current.length > 0 && invadersRef.current.every(i => !i.alive)) onWin(scoreRef.current);
   };
 
   const draw = () => {
@@ -222,89 +263,79 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Draw Grid Lines (Stylized background)
-    ctx.strokeStyle = '#1a1a1a';
+    // Grid
+    ctx.strokeStyle = '#111';
     ctx.lineWidth = 1;
-    for (let i = 0; i < CANVAS_WIDTH; i += 50) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, CANVAS_HEIGHT);
-      ctx.stroke();
-    }
-    for (let i = 0; i < CANVAS_HEIGHT; i += 50) {
-      ctx.beginPath();
-      ctx.moveTo(0, i);
-      ctx.lineTo(CANVAS_WIDTH, i);
-      ctx.stroke();
-    }
+    for(let i=0; i<CANVAS_WIDTH; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,CANVAS_HEIGHT); ctx.stroke(); }
+    for(let i=0; i<CANVAS_HEIGHT; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(CANVAS_WIDTH,i); ctx.stroke(); }
 
-    // Draw Particles
-    particlesRef.current.forEach(p => {
-      ctx.globalAlpha = p.life;
-      ctx.fillStyle = p.color;
-      ctx.fillRect(p.x, p.y, 3, 3);
+    const p = playerRef.current;
+
+    // Particles
+    particlesRef.current.forEach(pt => {
+      ctx.globalAlpha = pt.life;
+      ctx.fillStyle = pt.color;
+      ctx.fillRect(pt.x, pt.y, 2, 2);
     });
     ctx.globalAlpha = 1;
 
-    // Draw Player (Neon Ship)
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = COLORS.GREEN;
-    ctx.fillStyle = COLORS.GREEN;
+    // Player
+    ctx.shadowBlur = p.isOverdrive ? 25 : 10;
+    ctx.shadowColor = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
+    ctx.fillStyle = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
     ctx.beginPath();
-    ctx.moveTo(playerRef.current.x + PLAYER_WIDTH / 2, playerRef.current.y);
-    ctx.lineTo(playerRef.current.x, playerRef.current.y + PLAYER_HEIGHT);
-    ctx.lineTo(playerRef.current.x + PLAYER_WIDTH, playerRef.current.y + PLAYER_HEIGHT);
-    ctx.closePath();
+    ctx.moveTo(p.x + PLAYER_WIDTH/2, p.y);
+    ctx.lineTo(p.x, p.y + PLAYER_HEIGHT);
+    ctx.lineTo(p.x + PLAYER_WIDTH, p.y + PLAYER_HEIGHT);
     ctx.fill();
 
-    // Draw Invaders
-    invadersRef.current.forEach(invader => {
-      if (!invader.alive) return;
+    // Meters
+    ctx.shadowBlur = 0;
+    if (p.charge > 0) {
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 6, PLAYER_WIDTH, 4);
+      ctx.fillStyle = p.charge >= 100 ? COLORS.CYAN : '#fff';
+      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 6, (p.charge/100) * PLAYER_WIDTH, 4);
+    }
+    ctx.fillStyle = 'rgba(189,0,255,0.1)';
+    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, PLAYER_WIDTH, 4);
+    ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#555';
+    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, (p.energy/100) * PLAYER_WIDTH, 4);
+
+    // Invaders
+    invadersRef.current.forEach(inv => {
+      if (!inv.alive) return;
       ctx.shadowBlur = 10;
       ctx.shadowColor = COLORS.PURPLE;
       ctx.fillStyle = COLORS.PURPLE;
-      
-      // Stylized Invader Shape
-      ctx.fillRect(invader.x + 5, invader.y, invader.width - 10, invader.height);
-      ctx.fillRect(invader.x, invader.y + 5, invader.width, invader.height - 10);
-      // "Eyes"
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(invader.x + 8, invader.y + 5, 4, 4);
-      ctx.fillRect(invader.x + invader.width - 12, invader.y + 5, 4, 4);
+      ctx.fillRect(inv.x + 4, inv.y, inv.width - 8, inv.height);
+      ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
     });
 
-    // Draw Bullets
-    bulletsRef.current.forEach(bullet => {
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = bullet.fromPlayer ? COLORS.CYAN : COLORS.RED;
-      ctx.fillStyle = bullet.fromPlayer ? COLORS.CYAN : COLORS.RED;
-      ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+    // Bullets
+    bulletsRef.current.forEach(b => {
+      ctx.shadowBlur = b.isMega ? 25 : 10;
+      ctx.shadowColor = b.fromPlayer ? (b.isMega ? COLORS.PINK : COLORS.CYAN) : COLORS.RED;
+      ctx.fillStyle = ctx.shadowColor;
+      ctx.fillRect(b.x, b.y, b.width, b.height);
     });
-
     ctx.shadowBlur = 0;
   };
 
-  const animate = () => {
+  const animate = useCallback(() => {
     update();
     draw();
     requestRef.current = requestAnimationFrame(animate);
-  };
+  }, [status, onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
 
   useEffect(() => {
     requestRef.current = requestAnimationFrame(animate);
-    return () => {
-      if (requestRef.current) cancelAnimationFrame(requestRef.current);
-    };
-  }, [status, input]);
+    return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
+  }, [animate]);
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden border-2 border-cyan-900/30 rounded-lg shadow-2xl shadow-cyan-500/20">
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_WIDTH}
-        height={CANVAS_HEIGHT}
-        className="max-w-full max-h-full object-contain"
-      />
+    <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden border-2 border-cyan-900/30 rounded-lg shadow-2xl">
+      <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="max-w-full max-h-full object-contain" />
     </div>
   );
 };

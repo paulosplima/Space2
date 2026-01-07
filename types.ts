@@ -9,6 +9,10 @@ export interface Entity {
 export interface Player extends Entity {
   speed: number;
   lives: number;
+  energy: number;
+  isOverdrive: boolean;
+  overdriveTime: number;
+  charge: number;
 }
 
 export interface Invader extends Entity {
@@ -20,6 +24,7 @@ export interface Invader extends Entity {
 export interface Bullet extends Entity {
   speed: number;
   fromPlayer: boolean;
+  isMega?: boolean;
 }
 
 export interface Particle {
