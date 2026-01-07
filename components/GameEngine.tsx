@@ -39,7 +39,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
   
-  // Refs para manter o loop sempre atualizado com os dados mais recentes
   const inputRef = useRef(input);
   const statusRef = useRef(status);
   const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
@@ -67,7 +66,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const lastDashTime = useRef(0);
   const wasFiringRef = useRef(false);
 
-  // Sincroniza refs em cada renderização
   useEffect(() => { inputRef.current = input; }, [input]);
   useEffect(() => { statusRef.current = status; }, [status]);
   useEffect(() => {
@@ -143,12 +141,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const now = Date.now();
     let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.8 : PLAYER_SPEED;
 
-    // Movimentação Lateral
+    // Movement
     if (inp.left) p.x -= currentSpeed;
     if (inp.right) p.x += currentSpeed;
     p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
 
-    // Dash Especial (Shift)
+    // Dash (Shift)
     if (inp.dash && now - lastDashTime.current > 600) {
       if (inp.left) p.x -= 150;
       if (inp.right) p.x += 150;
@@ -158,7 +156,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 15);
     }
 
-    // Overdrive Especial (C)
+    // Overdrive (C)
     if (p.isOverdrive) {
       p.overdriveTime--;
       if (p.overdriveTime <= 0) p.isOverdrive = false;
@@ -171,33 +169,45 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
     if (!p.isOverdrive && p.energy < 100) p.energy += 0.5;
 
-    // Lógica de Disparo
+    // REFACTORED: Firing Logic
+    const COOLDOWN_STANDARD = 250; // ms
+    const COOLDOWN_OVERDRIVE = 90; // ms
+    const CHARGE_RATE = 2.5;
+
     if (inp.fire) {
       if (p.isOverdrive) {
-        if (now - lastFireTime.current > 80) {
+        // Overdrive Rapid Fire
+        if (now - lastFireTime.current > COOLDOWN_OVERDRIVE) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           fireBullet(p.x + PLAYER_WIDTH / 2 - 25, p.y + 10);
           fireBullet(p.x + PLAYER_WIDTH / 2 + 25, p.y + 10);
           lastFireTime.current = now;
         }
       } else {
-        if (!wasFiringRef.current && now - lastFireTime.current > 150) {
+        // Standard Semi-Auto Firing
+        // Fire once immediately on trigger pull if off cooldown
+        if (!wasFiringRef.current && now - lastFireTime.current > COOLDOWN_STANDARD) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           lastFireTime.current = now;
         }
-        p.charge = Math.min(100, p.charge + 3);
+        // Accumulate charge while trigger is held
+        p.charge = Math.min(100, p.charge + CHARGE_RATE);
       }
       wasFiringRef.current = true;
     } else {
-      if (p.charge >= 100) {
-        fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
-        lastFireTime.current = now;
+      // Trigger Released
+      if (wasFiringRef.current) {
+        // Fire charged shot if criteria met
+        if (!p.isOverdrive && p.charge >= 100) {
+          fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
+          lastFireTime.current = now;
+        }
+        p.charge = 0;
       }
-      p.charge = 0;
       wasFiringRef.current = false;
     }
 
-    // Movimentação Invasores
+    // Invader Logic
     let edgeReached = false;
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
@@ -212,7 +222,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       invaderSpeed.current = Math.min(invaderSpeed.current + 0.15, 6);
     }
 
-    // Disparos Invasores
+    // Invader Shots
     if (Math.random() < 0.025) {
       const active = invadersRef.current.filter(i => i.alive);
       if (active.length > 0) {
@@ -225,7 +235,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }
     }
 
-    // Colisões e Atualização de Projéteis
+    // Collisions
     bulletsRef.current = bulletsRef.current.filter(b => {
       b.y += b.speed;
       if (b.fromPlayer) {
@@ -267,7 +277,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Fundo Grid Neon
     ctx.strokeStyle = '#0a0a0a';
     ctx.lineWidth = 1;
     for(let i=0; i<CANVAS_WIDTH; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,CANVAS_HEIGHT); ctx.stroke(); }
@@ -275,7 +284,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
     const p = playerRef.current;
 
-    // Partículas de explosão
     particlesRef.current.forEach(pt => {
       ctx.globalAlpha = pt.life;
       ctx.fillStyle = pt.color;
@@ -283,7 +291,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     });
     ctx.globalAlpha = 1;
 
-    // Jogador (Triângulo Neon)
     ctx.shadowBlur = p.isOverdrive ? 30 : 15;
     ctx.shadowColor = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
     ctx.fillStyle = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
@@ -293,7 +300,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.lineTo(p.x + PLAYER_WIDTH, p.y + PLAYER_HEIGHT);
     ctx.fill();
 
-    // Medidores de Carga e Energia
     ctx.shadowBlur = 0;
     if (p.charge > 0) {
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
@@ -306,7 +312,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#333';
     ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 16, (p.energy/100) * PLAYER_WIDTH, 4);
 
-    // Invasores
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
       ctx.shadowBlur = 15;
@@ -316,7 +321,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
       ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
     });
 
-    // Projéteis (Balas)
     bulletsRef.current.forEach(b => {
       ctx.shadowBlur = b.isMega ? 30 : 15;
       ctx.shadowColor = b.fromPlayer ? (b.isMega ? COLORS.PINK : COLORS.CYAN) : COLORS.RED;
@@ -326,12 +330,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.shadowBlur = 0;
   };
 
-  // Garante que o nível reinicie quando o status mudar para PLAYING
   useEffect(() => {
     if (status === 'PLAYING') initLevel();
   }, [status, initLevel]);
 
-  // Motor de loop principal
   const updateRef = useRef(update);
   const drawRef = useRef(draw);
 
