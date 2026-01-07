@@ -14,7 +14,9 @@ const App: React.FC = () => {
     lives: 3
   });
 
-  const [input, setInput] = useState({ 
+  // Use a Ref for inputs to ensure the GameEngine always has the absolute latest values
+  // without waiting for React render cycles or state batching.
+  const inputRef = useRef({ 
     left: false, 
     right: false, 
     fire: false, 
@@ -55,22 +57,28 @@ const App: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const gameKeys = ['arrowleft', 'a', 'arrowright', 'd', ' ', 'enter', 'shift', 'c'];
+    
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: true }));
-      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: true }));
-      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: true }));
-      if (key === 'shift') setInput(prev => ({ ...prev, dash: true }));
-      if (key === 'c') setInput(prev => ({ ...prev, overdrive: true }));
+      if (gameKeys.includes(key)) {
+        e.preventDefault(); // Prevent scrolling
+      }
+      
+      if (key === 'arrowleft' || key === 'a') inputRef.current.left = true;
+      if (key === 'arrowright' || key === 'd') inputRef.current.right = true;
+      if (key === ' ' || key === 'enter') inputRef.current.fire = true;
+      if (key === 'shift') inputRef.current.dash = true;
+      if (key === 'c') inputRef.current.overdrive = true;
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: false }));
-      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: false }));
-      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: false }));
-      if (key === 'shift') setInput(prev => ({ ...prev, dash: false }));
-      if (key === 'c') setInput(prev => ({ ...prev, overdrive: false }));
+      if (key === 'arrowleft' || key === 'a') inputRef.current.left = false;
+      if (key === 'arrowright' || key === 'd') inputRef.current.right = false;
+      if (key === ' ' || key === 'enter') inputRef.current.fire = false;
+      if (key === 'shift') inputRef.current.dash = false;
+      if (key === 'c') inputRef.current.overdrive = false;
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -116,7 +124,7 @@ const App: React.FC = () => {
           onWin={handleWin}
           onScoreUpdate={handleScoreUpdate}
           onLivesUpdate={handleLivesUpdate}
-          input={input}
+          inputRef={inputRef}
         />
 
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 w-full max-w-sm z-20 px-4">
@@ -170,7 +178,7 @@ const App: React.FC = () => {
 
       <TouchControls onInputUpdate={(key, pressed) => {
         if (pressed && gameState.status === 'PLAYING') audio.init();
-        setInput(prev => ({ ...prev, [key]: pressed }));
+        inputRef.current[key as keyof typeof inputRef.current] = pressed;
       }} />
 
       <footer className="mt-4 text-center z-10 opacity-20 hover:opacity-100 transition-opacity">

@@ -25,7 +25,7 @@ interface GameEngineProps {
   onWin: (score: number) => void;
   onScoreUpdate: (score: number) => void;
   onLivesUpdate: (lives: number) => void;
-  input: { left: boolean; right: boolean; fire: boolean; dash: boolean; overdrive: boolean };
+  inputRef: React.MutableRefObject<{ left: boolean; right: boolean; fire: boolean; dash: boolean; overdrive: boolean }>;
 }
 
 const GameEngine: React.FC<GameEngineProps> = ({ 
@@ -34,13 +34,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
   onWin, 
   onScoreUpdate, 
   onLivesUpdate,
-  input 
+  inputRef 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
   
-  const inputRef = useRef(input);
+  // Update statusRef synchronously during render to avoid frame lag
   const statusRef = useRef(status);
+  statusRef.current = status;
+
   const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
   const shakeRef = useRef(0);
   const frameCounterRef = useRef(0);
@@ -53,6 +55,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     speed: PLAYER_SPEED,
     lives: 3,
     energy: 100,
+    // Fix: Corrected property assignment for isOverdrive (removed 'boolean =')
     isOverdrive: false,
     overdriveTime: 0,
     charge: 0,
@@ -69,8 +72,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const lastDashTime = useRef(0);
   const wasFiringRef = useRef(false);
 
-  useEffect(() => { inputRef.current = input; }, [input]);
-  useEffect(() => { statusRef.current = status; }, [status]);
   useEffect(() => {
     callbacksRef.current = { onGameOver, onWin, onScoreUpdate, onLivesUpdate };
   }, [onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
@@ -192,7 +193,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
     if (!p.isOverdrive && p.energy < 100) p.energy += 0.5;
 
-    // Firing Logic
+    // Firing Logic - Improved for constant fire while holding
     const COOLDOWN_STANDARD = 250;
     const COOLDOWN_OVERDRIVE = 90;
     const CHARGE_RATE = 2.5;
@@ -206,7 +207,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
           lastFireTime.current = now;
         }
       } else {
-        if (!wasFiringRef.current && now - lastFireTime.current > COOLDOWN_STANDARD) {
+        // Continuous fire at cooldown rate
+        if (now - lastFireTime.current > COOLDOWN_STANDARD) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           lastFireTime.current = now;
         }
@@ -345,11 +347,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 16, (p.energy/100) * PLAYER_WIDTH, 4);
 
     // Squash and Stretch Logic for Invaders
-    // We base the intensity on the movement speed and a rhythm counter
     const squashFactor = 0.08 * Math.abs(invaderDirection.current);
     const wave = Math.sin(frameCounterRef.current * 0.15);
-    const sx = 1.0 - (squashFactor * (1.0 + wave) * 0.5); // Squash in movement direction (X)
-    const sy = 1.0 + (squashFactor * (1.0 + wave) * 0.5); // Stretch perpendicular (Y)
+    const sx = 1.0 - (squashFactor * (1.0 + wave) * 0.5);
+    const sy = 1.0 + (squashFactor * (1.0 + wave) * 0.5);
 
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
@@ -365,7 +366,6 @@ const GameEngine: React.FC<GameEngineProps> = ({
       ctx.shadowBlur = 15;
       ctx.shadowColor = COLORS.PURPLE;
       ctx.fillStyle = COLORS.PURPLE;
-      // Drawing the body (pixelated style)
       ctx.fillRect(inv.x + 4, inv.y, inv.width - 8, inv.height);
       ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
       
