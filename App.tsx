@@ -57,32 +57,20 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      
-      setInput(prev => {
-        const next = { ...prev };
-        if (key === 'arrowleft' || key === 'a') next.left = true;
-        if (key === 'arrowright' || key === 'd') next.right = true;
-        if (key === ' ' || key === 'enter') next.fire = true;
-        if (key === 'shift') next.dash = true;
-        if (key === 'c') next.overdrive = true;
-        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-        return next;
-      });
+      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: true }));
+      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: true }));
+      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: true }));
+      if (key === 'shift') setInput(prev => ({ ...prev, dash: true }));
+      if (key === 'c') setInput(prev => ({ ...prev, overdrive: true }));
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
-      
-      setInput(prev => {
-        const next = { ...prev };
-        if (key === 'arrowleft' || key === 'a') next.left = false;
-        if (key === 'arrowright' || key === 'd') next.right = false;
-        if (key === ' ' || key === 'enter') next.fire = false;
-        if (key === 'shift') next.dash = false;
-        if (key === 'c') next.overdrive = false;
-        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
-        return next;
-      });
+      if (key === 'arrowleft' || key === 'a') setInput(prev => ({ ...prev, left: false }));
+      if (key === 'arrowright' || key === 'd') setInput(prev => ({ ...prev, right: false }));
+      if (key === ' ' || key === 'enter') setInput(prev => ({ ...prev, fire: false }));
+      if (key === 'shift') setInput(prev => ({ ...prev, dash: false }));
+      if (key === 'c') setInput(prev => ({ ...prev, overdrive: false }));
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -105,7 +93,7 @@ const App: React.FC = () => {
           <h1 className="text-2xl md:text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
             NEON STRIKE
           </h1>
-          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.4</span>
+          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.5</span>
         </div>
         
         <div className="flex items-center gap-6">
@@ -146,7 +134,7 @@ const App: React.FC = () => {
         {gameState.status === 'START' && (
           <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/80 backdrop-blur-sm rounded-lg p-6 text-center">
             <div className="max-w-md animate-in fade-in zoom-in duration-300">
-              <h2 className="text-5xl font-black mb-2 italic">NEON STRIKE</h2>
+              <h2 className="text-5xl font-black mb-2 italic text-white">NEON STRIKE</h2>
               <p className="text-cyan-400 mb-8 uppercase tracking-[0.3em] font-bold text-xs">Protocolo Matchin Ativado</p>
               <div className="space-y-4">
                 <button onClick={startGame} className="w-full py-4 px-8 bg-white text-black font-black text-xl rounded-full hover:bg-cyan-400 transition-all shadow-[0_0_30px_rgba(255,255,255,0.2)]">

@@ -39,9 +39,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const requestRef = useRef<number | null>(null);
   
-  // Referências para persistência e performance
+  // Refs para manter o loop sempre atualizado com os dados mais recentes
   const inputRef = useRef(input);
   const statusRef = useRef(status);
+  const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
+
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
     y: CANVAS_HEIGHT - 60,
@@ -65,11 +67,9 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const lastDashTime = useRef(0);
   const wasFiringRef = useRef(false);
 
-  // Atualiza refs quando as props mudam
+  // Sincroniza refs em cada renderização
   useEffect(() => { inputRef.current = input; }, [input]);
   useEffect(() => { statusRef.current = status; }, [status]);
-
-  const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
   useEffect(() => {
     callbacksRef.current = { onGameOver, onWin, onScoreUpdate, onLivesUpdate };
   }, [onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
@@ -103,7 +103,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     };
 
     invadersRef.current = invaders;
-    invaderSpeed.current = 1.2;
+    invaderSpeed.current = 1.5;
     invaderDirection.current = 1;
     bulletsRef.current = [];
     scoreRef.current = 0;
@@ -115,8 +115,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
     for (let i = 0; i < count; i++) {
       particlesRef.current.push({
         x, y,
-        vx: (Math.random() - 0.5) * 10,
-        vy: (Math.random() - 0.5) * 10,
+        vx: (Math.random() - 0.5) * 12,
+        vy: (Math.random() - 0.5) * 12,
         life: 1, color
       });
     }
@@ -128,7 +128,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       y: y,
       width: isMega ? 12 : BULLET_WIDTH,
       height: isMega ? 24 : BULLET_HEIGHT,
-      speed: -BULLET_SPEED * (isMega ? 0.8 : 1.2),
+      speed: -BULLET_SPEED * (isMega ? 0.7 : 1.3),
       fromPlayer: true,
       isMega
     });
@@ -141,52 +141,51 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const inp = inputRef.current;
     const p = playerRef.current;
     const now = Date.now();
-    let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.6 : PLAYER_SPEED;
+    let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.8 : PLAYER_SPEED;
 
-    // Movimentação
+    // Movimentação Lateral
     if (inp.left) p.x -= currentSpeed;
     if (inp.right) p.x += currentSpeed;
     p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
 
-    // Dash
-    if (inp.dash && now - lastDashTime.current > 700) {
-      if (inp.left) p.x -= 140;
-      if (inp.right) p.x += 140;
+    // Dash Especial (Shift)
+    if (inp.dash && now - lastDashTime.current > 600) {
+      if (inp.left) p.x -= 150;
+      if (inp.right) p.x += 150;
       p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
       lastDashTime.current = now;
       audio.playDash();
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 12);
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 15);
     }
 
-    // Overdrive
+    // Overdrive Especial (C)
     if (p.isOverdrive) {
       p.overdriveTime--;
       if (p.overdriveTime <= 0) p.isOverdrive = false;
     } else if (inp.overdrive && p.energy >= 100) {
       p.isOverdrive = true;
-      p.overdriveTime = 300;
+      p.overdriveTime = 400;
       p.energy = 0;
       audio.playOverdrive();
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 25);
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 30);
     }
-    if (!p.isOverdrive && p.energy < 100) p.energy += 0.4;
+    if (!p.isOverdrive && p.energy < 100) p.energy += 0.5;
 
-    // Tiro
+    // Lógica de Disparo
     if (inp.fire) {
       if (p.isOverdrive) {
-        if (now - lastFireTime.current > 100) {
+        if (now - lastFireTime.current > 80) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
-          fireBullet(p.x + PLAYER_WIDTH / 2 - 20, p.y + 10);
-          fireBullet(p.x + PLAYER_WIDTH / 2 + 20, p.y + 10);
+          fireBullet(p.x + PLAYER_WIDTH / 2 - 25, p.y + 10);
+          fireBullet(p.x + PLAYER_WIDTH / 2 + 25, p.y + 10);
           lastFireTime.current = now;
         }
       } else {
-        // Atira imediatamente no primeiro clique
-        if (!wasFiringRef.current && now - lastFireTime.current > 200) {
+        if (!wasFiringRef.current && now - lastFireTime.current > 150) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
           lastFireTime.current = now;
         }
-        p.charge = Math.min(100, p.charge + 2.5);
+        p.charge = Math.min(100, p.charge + 3);
       }
       wasFiringRef.current = true;
     } else {
@@ -198,7 +197,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       wasFiringRef.current = false;
     }
 
-    // Invasores
+    // Movimentação Invasores
     let edgeReached = false;
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
@@ -210,23 +209,23 @@ const GameEngine: React.FC<GameEngineProps> = ({
     if (edgeReached) {
       invaderDirection.current *= -1;
       invadersRef.current.forEach(inv => { inv.y += 25; });
-      invaderSpeed.current = Math.min(invaderSpeed.current + 0.1, 5);
+      invaderSpeed.current = Math.min(invaderSpeed.current + 0.15, 6);
     }
 
-    // Tiro Invasor
-    if (Math.random() < 0.02) {
+    // Disparos Invasores
+    if (Math.random() < 0.025) {
       const active = invadersRef.current.filter(i => i.alive);
       if (active.length > 0) {
         const s = active[Math.floor(Math.random() * active.length)];
         bulletsRef.current.push({
           x: s.x + s.width / 2, y: s.y + s.height,
           width: BULLET_WIDTH, height: BULLET_HEIGHT,
-          speed: BULLET_SPEED - 3, fromPlayer: false
+          speed: BULLET_SPEED - 4, fromPlayer: false
         });
       }
     }
 
-    // Colisões e Projéteis
+    // Colisões e Atualização de Projéteis
     bulletsRef.current = bulletsRef.current.filter(b => {
       b.y += b.speed;
       if (b.fromPlayer) {
@@ -244,17 +243,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
         if (b.x < p.x + PLAYER_WIDTH && b.x + b.width > p.x && b.y < p.y + PLAYER_HEIGHT && b.y + b.height > p.y) {
           p.lives--;
           callbacksRef.current.onLivesUpdate(p.lives);
-          spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 15);
+          spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 20);
           audio.playPlayerHit();
           if (p.lives <= 0) callbacksRef.current.onGameOver(scoreRef.current);
           return false;
         }
       }
-      return b.y > 0 && b.y < CANVAS_HEIGHT;
+      return b.y > -50 && b.y < CANVAS_HEIGHT + 50;
     });
 
-    // Partículas
-    particlesRef.current.forEach(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.life -= 0.03; });
+    particlesRef.current.forEach(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.life -= 0.035; });
     particlesRef.current = particlesRef.current.filter(pt => pt.life > 0);
 
     if (invadersRef.current.length > 0 && invadersRef.current.every(i => !i.alive)) callbacksRef.current.onWin(scoreRef.current);
@@ -269,15 +267,15 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Grid Neon
-    ctx.strokeStyle = '#111';
+    // Fundo Grid Neon
+    ctx.strokeStyle = '#0a0a0a';
     ctx.lineWidth = 1;
     for(let i=0; i<CANVAS_WIDTH; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,CANVAS_HEIGHT); ctx.stroke(); }
     for(let i=0; i<CANVAS_HEIGHT; i+=40) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(CANVAS_WIDTH,i); ctx.stroke(); }
 
     const p = playerRef.current;
 
-    // Partículas
+    // Partículas de explosão
     particlesRef.current.forEach(pt => {
       ctx.globalAlpha = pt.life;
       ctx.fillStyle = pt.color;
@@ -285,8 +283,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
     });
     ctx.globalAlpha = 1;
 
-    // Jogador (Triângulo Verde)
-    ctx.shadowBlur = p.isOverdrive ? 25 : 10;
+    // Jogador (Triângulo Neon)
+    ctx.shadowBlur = p.isOverdrive ? 30 : 15;
     ctx.shadowColor = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
     ctx.fillStyle = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
     ctx.beginPath();
@@ -295,32 +293,32 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.lineTo(p.x + PLAYER_WIDTH, p.y + PLAYER_HEIGHT);
     ctx.fill();
 
-    // UI da Nave
+    // Medidores de Carga e Energia
     ctx.shadowBlur = 0;
     if (p.charge > 0) {
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 6, PLAYER_WIDTH, 4);
+      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 8, PLAYER_WIDTH, 4);
       ctx.fillStyle = p.charge >= 100 ? COLORS.CYAN : '#fff';
-      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 6, (p.charge/100) * PLAYER_WIDTH, 4);
+      ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 8, (p.charge/100) * PLAYER_WIDTH, 4);
     }
     ctx.fillStyle = 'rgba(189,0,255,0.1)';
-    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, PLAYER_WIDTH, 4);
-    ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#444';
-    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, (p.energy/100) * PLAYER_WIDTH, 4);
+    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 16, PLAYER_WIDTH, 4);
+    ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#333';
+    ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 16, (p.energy/100) * PLAYER_WIDTH, 4);
 
     // Invasores
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
-      ctx.shadowBlur = 10;
+      ctx.shadowBlur = 15;
       ctx.shadowColor = COLORS.PURPLE;
       ctx.fillStyle = COLORS.PURPLE;
       ctx.fillRect(inv.x + 4, inv.y, inv.width - 8, inv.height);
       ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
     });
 
-    // Projéteis
+    // Projéteis (Balas)
     bulletsRef.current.forEach(b => {
-      ctx.shadowBlur = b.isMega ? 25 : 10;
+      ctx.shadowBlur = b.isMega ? 30 : 15;
       ctx.shadowColor = b.fromPlayer ? (b.isMega ? COLORS.PINK : COLORS.CYAN) : COLORS.RED;
       ctx.fillStyle = ctx.shadowColor;
       ctx.fillRect(b.x, b.y, b.width, b.height);
@@ -328,14 +326,24 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.shadowBlur = 0;
   };
 
+  // Garante que o nível reinicie quando o status mudar para PLAYING
   useEffect(() => {
     if (status === 'PLAYING') initLevel();
   }, [status, initLevel]);
 
+  // Motor de loop principal
+  const updateRef = useRef(update);
+  const drawRef = useRef(draw);
+
+  useEffect(() => {
+    updateRef.current = update;
+    drawRef.current = draw;
+  });
+
   useEffect(() => {
     const loop = () => {
-      update();
-      draw();
+      updateRef.current();
+      drawRef.current();
       requestRef.current = requestAnimationFrame(loop);
     };
     requestRef.current = requestAnimationFrame(loop);
@@ -344,7 +352,12 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden border-2 border-cyan-900/30 rounded-lg shadow-2xl">
-      <canvas ref={canvasRef} width={CANVAS_WIDTH} height={CANVAS_HEIGHT} className="max-w-full max-h-full object-contain" />
+      <canvas 
+        ref={canvasRef} 
+        width={CANVAS_WIDTH} 
+        height={CANVAS_HEIGHT} 
+        className="max-w-full max-h-full object-contain pointer-events-none" 
+      />
     </div>
   );
 };
