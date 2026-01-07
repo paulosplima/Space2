@@ -17,6 +17,7 @@ import {
   COLORS
 } from '../constants';
 import { Player, Invader, Bullet, Particle, GameStatus } from '../types';
+import { audio } from '../services/audioService';
 
 interface GameEngineProps {
   status: GameStatus;
@@ -36,19 +37,11 @@ const GameEngine: React.FC<GameEngineProps> = ({
   input 
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number | undefined>(undefined);
+  const requestRef = useRef<number | null>(null);
   
-  // Use refs for inputs and callbacks to keep the animate loop stable
+  // Referências para persistência e performance
   const inputRef = useRef(input);
-  useEffect(() => {
-    inputRef.current = input;
-  }, [input]);
-
-  const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
-  useEffect(() => {
-    callbacksRef.current = { onGameOver, onWin, onScoreUpdate, onLivesUpdate };
-  }, [onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
-
+  const statusRef = useRef(status);
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
     y: CANVAS_HEIGHT - 60,
@@ -70,6 +63,16 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const invaderSpeed = useRef(1);
   const lastFireTime = useRef(0);
   const lastDashTime = useRef(0);
+  const wasFiringRef = useRef(false);
+
+  // Atualiza refs quando as props mudam
+  useEffect(() => { inputRef.current = input; }, [input]);
+  useEffect(() => { statusRef.current = status; }, [status]);
+
+  const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
+  useEffect(() => {
+    callbacksRef.current = { onGameOver, onWin, onScoreUpdate, onLivesUpdate };
+  }, [onGameOver, onWin, onScoreUpdate, onLivesUpdate]);
 
   const initLevel = useCallback(() => {
     const invaders: Invader[] = [];
@@ -90,128 +93,127 @@ const GameEngine: React.FC<GameEngineProps> = ({
       }
     }
     
-    // Reset Player position and state
-    playerRef.current.x = CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2;
-    playerRef.current.y = CANVAS_HEIGHT - 60;
-    playerRef.current.lives = 3;
-    playerRef.current.energy = 100;
-    playerRef.current.charge = 0;
-    playerRef.current.isOverdrive = false;
+    playerRef.current = {
+      ...playerRef.current,
+      x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
+      lives: 3,
+      energy: 100,
+      charge: 0,
+      isOverdrive: false
+    };
 
     invadersRef.current = invaders;
-    invaderSpeed.current = 1;
+    invaderSpeed.current = 1.2;
+    invaderDirection.current = 1;
     bulletsRef.current = [];
     scoreRef.current = 0;
     callbacksRef.current.onScoreUpdate(0);
     callbacksRef.current.onLivesUpdate(3);
   }, []);
 
-  useEffect(() => {
-    if (status === 'PLAYING') {
-      initLevel();
-    }
-  }, [status, initLevel]);
-
   const spawnExplosion = (x: number, y: number, color: string, count = 8) => {
     for (let i = 0; i < count; i++) {
       particlesRef.current.push({
         x, y,
-        vx: (Math.random() - 0.5) * 8,
-        vy: (Math.random() - 0.5) * 8,
+        vx: (Math.random() - 0.5) * 10,
+        vy: (Math.random() - 0.5) * 10,
         life: 1, color
       });
     }
   };
 
-  const fireBullet = (x: number, y: number, isMega = false, angle = 0) => {
-    const vy = -BULLET_SPEED;
-    
+  const fireBullet = (x: number, y: number, isMega = false) => {
     bulletsRef.current.push({
       x: x - (isMega ? 6 : 2),
       y: y,
       width: isMega ? 12 : BULLET_WIDTH,
       height: isMega ? 24 : BULLET_HEIGHT,
-      speed: vy,
+      speed: -BULLET_SPEED * (isMega ? 0.8 : 1.2),
       fromPlayer: true,
       isMega
     });
+    if (isMega) audio.playMegaShoot(); else audio.playShoot();
   };
 
   const update = () => {
-    if (status !== 'PLAYING') return;
+    if (statusRef.current !== 'PLAYING') return;
 
-    const currentInput = inputRef.current;
+    const inp = inputRef.current;
     const p = playerRef.current;
-    let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.5 : PLAYER_SPEED;
+    const now = Date.now();
+    let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.6 : PLAYER_SPEED;
 
-    // Overdrive Logic
+    // Movimentação
+    if (inp.left) p.x -= currentSpeed;
+    if (inp.right) p.x += currentSpeed;
+    p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
+
+    // Dash
+    if (inp.dash && now - lastDashTime.current > 700) {
+      if (inp.left) p.x -= 140;
+      if (inp.right) p.x += 140;
+      p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
+      lastDashTime.current = now;
+      audio.playDash();
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 12);
+    }
+
+    // Overdrive
     if (p.isOverdrive) {
       p.overdriveTime--;
       if (p.overdriveTime <= 0) p.isOverdrive = false;
-    } else if (currentInput.overdrive && p.energy >= 100) {
+    } else if (inp.overdrive && p.energy >= 100) {
       p.isOverdrive = true;
       p.overdriveTime = 300;
       p.energy = 0;
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 20);
+      audio.playOverdrive();
+      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y, COLORS.PINK, 25);
     }
-    
-    if (!p.isOverdrive && p.energy < 100) p.energy += 0.3;
+    if (!p.isOverdrive && p.energy < 100) p.energy += 0.4;
 
-    // Dash Logic
-    if (currentInput.dash && Date.now() - lastDashTime.current > 800) {
-      if (currentInput.left) p.x -= 120;
-      if (currentInput.right) p.x += 120;
-      lastDashTime.current = Date.now();
-      spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.CYAN, 10);
-    }
-
-    // Move Player
-    if (currentInput.left) p.x -= currentSpeed;
-    if (currentInput.right) p.x += currentSpeed;
-    p.x = Math.max(0, Math.min(CANVAS_WIDTH - PLAYER_WIDTH, p.x));
-
-    // Shooting Logic
-    const now = Date.now();
-    if (currentInput.fire) {
+    // Tiro
+    if (inp.fire) {
       if (p.isOverdrive) {
-        if (now - lastFireTime.current > 120) {
+        if (now - lastFireTime.current > 100) {
           fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
-          fireBullet(p.x + PLAYER_WIDTH / 2 - 15, p.y, false, -0.15);
-          fireBullet(p.x + PLAYER_WIDTH / 2 + 15, p.y, false, 0.15);
+          fireBullet(p.x + PLAYER_WIDTH / 2 - 20, p.y + 10);
+          fireBullet(p.x + PLAYER_WIDTH / 2 + 20, p.y + 10);
           lastFireTime.current = now;
         }
       } else {
-        // Fire one bullet immediately if we haven't fired in a while
-        if (p.charge === 0 && now - lastFireTime.current > 400) {
-            fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
-            lastFireTime.current = now;
+        // Atira imediatamente no primeiro clique
+        if (!wasFiringRef.current && now - lastFireTime.current > 200) {
+          fireBullet(p.x + PLAYER_WIDTH / 2, p.y);
+          lastFireTime.current = now;
         }
-        p.charge = Math.min(100, p.charge + 2);
+        p.charge = Math.min(100, p.charge + 2.5);
       }
+      wasFiringRef.current = true;
     } else {
       if (p.charge >= 100) {
         fireBullet(p.x + PLAYER_WIDTH / 2, p.y, true);
         lastFireTime.current = now;
       }
       p.charge = 0;
+      wasFiringRef.current = false;
     }
 
-    // Move Invaders
+    // Invasores
     let edgeReached = false;
-    invadersRef.current.forEach(invader => {
-      if (!invader.alive) return;
-      invader.x += invaderDirection.current * invaderSpeed.current;
-      if (invader.x + invader.width > CANVAS_WIDTH - 10 || invader.x < 10) edgeReached = true;
-      if (invader.y + invader.height > p.y) callbacksRef.current.onGameOver(scoreRef.current);
+    invadersRef.current.forEach(inv => {
+      if (!inv.alive) return;
+      inv.x += invaderDirection.current * invaderSpeed.current;
+      if (inv.x + inv.width > CANVAS_WIDTH - 10 || inv.x < 10) edgeReached = true;
+      if (inv.y + inv.height > p.y) callbacksRef.current.onGameOver(scoreRef.current);
     });
 
     if (edgeReached) {
       invaderDirection.current *= -1;
-      invadersRef.current.forEach(invader => { invader.y += 20; });
-      invaderSpeed.current += 0.05;
+      invadersRef.current.forEach(inv => { inv.y += 25; });
+      invaderSpeed.current = Math.min(invaderSpeed.current + 0.1, 5);
     }
 
-    // Invader Shooting
+    // Tiro Invasor
     if (Math.random() < 0.02) {
       const active = invadersRef.current.filter(i => i.alive);
       if (active.length > 0) {
@@ -219,43 +221,41 @@ const GameEngine: React.FC<GameEngineProps> = ({
         bulletsRef.current.push({
           x: s.x + s.width / 2, y: s.y + s.height,
           width: BULLET_WIDTH, height: BULLET_HEIGHT,
-          speed: BULLET_SPEED - 2, fromPlayer: false
+          speed: BULLET_SPEED - 3, fromPlayer: false
         });
       }
     }
 
-    // Bullets and Collisions
-    bulletsRef.current = bulletsRef.current.filter(bullet => {
-      bullet.y += bullet.speed;
-      if (bullet.fromPlayer) {
-        for (const invader of invadersRef.current) {
-          if (invader.alive &&
-              bullet.x < invader.x + invader.width &&
-              bullet.x + bullet.width > invader.x &&
-              bullet.y < invader.y + invader.height &&
-              bullet.y + bullet.height > invader.y) {
-            invader.alive = false;
-            scoreRef.current += invader.points;
+    // Colisões e Projéteis
+    bulletsRef.current = bulletsRef.current.filter(b => {
+      b.y += b.speed;
+      if (b.fromPlayer) {
+        for (const inv of invadersRef.current) {
+          if (inv.alive && b.x < inv.x + inv.width && b.x + b.width > inv.x && b.y < inv.y + inv.height && b.y + b.height > inv.y) {
+            inv.alive = false;
+            scoreRef.current += inv.points;
             callbacksRef.current.onScoreUpdate(scoreRef.current);
-            spawnExplosion(invader.x + invader.width/2, invader.y + invader.height/2, bullet.isMega ? COLORS.PINK : COLORS.CYAN);
-            if (!bullet.isMega) return false;
+            spawnExplosion(inv.x + inv.width/2, inv.y + inv.height/2, b.isMega ? COLORS.PINK : COLORS.CYAN);
+            audio.playExplosion();
+            if (!b.isMega) return false;
           }
         }
       } else {
-        if (bullet.x < p.x + PLAYER_WIDTH && bullet.x + bullet.width > p.x &&
-            bullet.y < p.y + PLAYER_HEIGHT && bullet.y + bullet.height > p.y) {
+        if (b.x < p.x + PLAYER_WIDTH && b.x + b.width > p.x && b.y < p.y + PLAYER_HEIGHT && b.y + b.height > p.y) {
           p.lives--;
           callbacksRef.current.onLivesUpdate(p.lives);
           spawnExplosion(p.x + PLAYER_WIDTH/2, p.y + PLAYER_HEIGHT/2, COLORS.RED, 15);
+          audio.playPlayerHit();
           if (p.lives <= 0) callbacksRef.current.onGameOver(scoreRef.current);
           return false;
         }
       }
-      return bullet.y > 0 && bullet.y < CANVAS_HEIGHT;
+      return b.y > 0 && b.y < CANVAS_HEIGHT;
     });
 
-    particlesRef.current.forEach(part => { part.x += part.vx; part.y += part.vy; part.life -= 0.025; });
-    particlesRef.current = particlesRef.current.filter(part => part.life > 0);
+    // Partículas
+    particlesRef.current.forEach(pt => { pt.x += pt.vx; pt.y += pt.vy; pt.life -= 0.03; });
+    particlesRef.current = particlesRef.current.filter(pt => pt.life > 0);
 
     if (invadersRef.current.length > 0 && invadersRef.current.every(i => !i.alive)) callbacksRef.current.onWin(scoreRef.current);
   };
@@ -269,7 +269,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = '#050505';
     ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Grid
+    // Grid Neon
     ctx.strokeStyle = '#111';
     ctx.lineWidth = 1;
     for(let i=0; i<CANVAS_WIDTH; i+=40) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,CANVAS_HEIGHT); ctx.stroke(); }
@@ -277,7 +277,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
 
     const p = playerRef.current;
 
-    // Particles
+    // Partículas
     particlesRef.current.forEach(pt => {
       ctx.globalAlpha = pt.life;
       ctx.fillStyle = pt.color;
@@ -285,7 +285,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     });
     ctx.globalAlpha = 1;
 
-    // Player
+    // Jogador (Triângulo Verde)
     ctx.shadowBlur = p.isOverdrive ? 25 : 10;
     ctx.shadowColor = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
     ctx.fillStyle = p.isOverdrive ? COLORS.PINK : COLORS.GREEN;
@@ -295,7 +295,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.lineTo(p.x + PLAYER_WIDTH, p.y + PLAYER_HEIGHT);
     ctx.fill();
 
-    // Meters
+    // UI da Nave
     ctx.shadowBlur = 0;
     if (p.charge > 0) {
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
@@ -305,10 +305,10 @@ const GameEngine: React.FC<GameEngineProps> = ({
     }
     ctx.fillStyle = 'rgba(189,0,255,0.1)';
     ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, PLAYER_WIDTH, 4);
-    ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#555';
+    ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#444';
     ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 14, (p.energy/100) * PLAYER_WIDTH, 4);
 
-    // Invaders
+    // Invasores
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
       ctx.shadowBlur = 10;
@@ -318,7 +318,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
       ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
     });
 
-    // Bullets
+    // Projéteis
     bulletsRef.current.forEach(b => {
       ctx.shadowBlur = b.isMega ? 25 : 10;
       ctx.shadowColor = b.fromPlayer ? (b.isMega ? COLORS.PINK : COLORS.CYAN) : COLORS.RED;
@@ -328,16 +328,19 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.shadowBlur = 0;
   };
 
-  const animate = useCallback(() => {
-    update();
-    draw();
-    requestRef.current = requestAnimationFrame(animate);
-  }, [status]); // Only restart loop if game status changes (Start/Over)
+  useEffect(() => {
+    if (status === 'PLAYING') initLevel();
+  }, [status, initLevel]);
 
   useEffect(() => {
-    requestRef.current = requestAnimationFrame(animate);
+    const loop = () => {
+      update();
+      draw();
+      requestRef.current = requestAnimationFrame(loop);
+    };
+    requestRef.current = requestAnimationFrame(loop);
     return () => { if (requestRef.current) cancelAnimationFrame(requestRef.current); };
-  }, [animate]);
+  }, []);
 
   return (
     <div className="relative w-full h-full flex items-center justify-center bg-black overflow-hidden border-2 border-cyan-900/30 rounded-lg shadow-2xl">

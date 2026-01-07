@@ -4,6 +4,7 @@ import GameEngine from './components/GameEngine';
 import TouchControls from './components/TouchControls';
 import { GameStatus, GameState } from './types';
 import { getMissionCommentary } from './services/geminiService';
+import { audio } from './services/audioService';
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>({
@@ -37,7 +38,6 @@ const App: React.FC = () => {
     }
   }, [gameState.status, gameState.score, gameState.level, updateTactical]);
 
-  // Memoize callbacks to prevent GameEngine from re-mounting or re-starting loop unnecessarily
   const handleGameOver = useCallback((score: number) => {
     setGameState(prev => ({ ...prev, status: 'GAMEOVER', score }));
   }, []);
@@ -56,7 +56,6 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat) return;
       const key = e.key.toLowerCase();
       
       setInput(prev => {
@@ -66,6 +65,7 @@ const App: React.FC = () => {
         if (key === ' ' || key === 'enter') next.fire = true;
         if (key === 'shift') next.dash = true;
         if (key === 'c') next.overdrive = true;
+        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
         return next;
       });
     };
@@ -80,6 +80,7 @@ const App: React.FC = () => {
         if (key === ' ' || key === 'enter') next.fire = false;
         if (key === 'shift') next.dash = false;
         if (key === 'c') next.overdrive = false;
+        if (JSON.stringify(prev) === JSON.stringify(next)) return prev;
         return next;
       });
     };
@@ -93,6 +94,7 @@ const App: React.FC = () => {
   }, []);
 
   const startGame = () => {
+    audio.init();
     setGameState({ status: 'PLAYING', score: 0, level: 1, lives: 3 });
   };
 
@@ -103,7 +105,7 @@ const App: React.FC = () => {
           <h1 className="text-2xl md:text-4xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.5)]">
             NEON STRIKE
           </h1>
-          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.2</span>
+          <span className="text-[10px] text-cyan-400/50 uppercase tracking-widest -mt-1 font-bold">MATCHIN INDUSTRIES v1.4</span>
         </div>
         
         <div className="flex items-center gap-6">
@@ -178,7 +180,10 @@ const App: React.FC = () => {
         )}
       </main>
 
-      <TouchControls onInputUpdate={(key, pressed) => setInput(prev => ({ ...prev, [key]: pressed }))} />
+      <TouchControls onInputUpdate={(key, pressed) => {
+        if (pressed && gameState.status === 'PLAYING') audio.init();
+        setInput(prev => ({ ...prev, [key]: pressed }));
+      }} />
 
       <footer className="mt-4 text-center z-10 opacity-20 hover:opacity-100 transition-opacity">
         <p className="text-[9px] uppercase tracking-[0.4em] font-black text-cyan-400">
