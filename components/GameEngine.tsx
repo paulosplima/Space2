@@ -43,6 +43,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
   const statusRef = useRef(status);
   const callbacksRef = useRef({ onGameOver, onWin, onScoreUpdate, onLivesUpdate });
   const shakeRef = useRef(0);
+  const frameCounterRef = useRef(0);
 
   const playerRef = useRef<Player>({
     x: CANVAS_WIDTH / 2 - PLAYER_WIDTH / 2,
@@ -111,6 +112,7 @@ const GameEngine: React.FC<GameEngineProps> = ({
     callbacksRef.current.onScoreUpdate(0);
     callbacksRef.current.onLivesUpdate(3);
     shakeRef.current = 0;
+    frameCounterRef.current = 0;
   }, []);
 
   const spawnExplosion = (x: number, y: number, color: string, count = 8, intensity = 0) => {
@@ -152,6 +154,8 @@ const GameEngine: React.FC<GameEngineProps> = ({
     const p = playerRef.current;
     const now = Date.now();
     let currentSpeed = p.isOverdrive ? PLAYER_SPEED * 1.8 : PLAYER_SPEED;
+
+    frameCounterRef.current++;
 
     // Shake Decay
     if (shakeRef.current > 0) shakeRef.current *= 0.9;
@@ -340,13 +344,32 @@ const GameEngine: React.FC<GameEngineProps> = ({
     ctx.fillStyle = p.energy >= 100 ? COLORS.PURPLE : '#333';
     ctx.fillRect(p.x, p.y + PLAYER_HEIGHT + 16, (p.energy/100) * PLAYER_WIDTH, 4);
 
+    // Squash and Stretch Logic for Invaders
+    // We base the intensity on the movement speed and a rhythm counter
+    const squashFactor = 0.08 * Math.abs(invaderDirection.current);
+    const wave = Math.sin(frameCounterRef.current * 0.15);
+    const sx = 1.0 - (squashFactor * (1.0 + wave) * 0.5); // Squash in movement direction (X)
+    const sy = 1.0 + (squashFactor * (1.0 + wave) * 0.5); // Stretch perpendicular (Y)
+
     invadersRef.current.forEach(inv => {
       if (!inv.alive) return;
+      
+      ctx.save();
+      const centerX = inv.x + inv.width / 2;
+      const centerY = inv.y + inv.height / 2;
+      
+      ctx.translate(centerX, centerY);
+      ctx.scale(sx, sy);
+      ctx.translate(-centerX, -centerY);
+
       ctx.shadowBlur = 15;
       ctx.shadowColor = COLORS.PURPLE;
       ctx.fillStyle = COLORS.PURPLE;
+      // Drawing the body (pixelated style)
       ctx.fillRect(inv.x + 4, inv.y, inv.width - 8, inv.height);
       ctx.fillRect(inv.x, inv.y + 4, inv.width, inv.height - 8);
+      
+      ctx.restore();
     });
 
     bulletsRef.current.forEach(b => {
